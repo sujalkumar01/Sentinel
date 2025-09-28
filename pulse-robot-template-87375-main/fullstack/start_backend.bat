@@ -1,4 +1,4 @@
 @echo off
-echo Starting Node.js backend...
+echo Starting Node.js backend on port 8003...
 cd backend
-npm start
+node server.js

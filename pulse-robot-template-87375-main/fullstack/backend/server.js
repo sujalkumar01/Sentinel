@@ -5,9 +5,13 @@ const axios = require('axios');
 const FormData = require('form-data');
 const path = require('path');
 const { spawn } = require('child_process');
+const LocationTracker = require('./locationTracker');
 
 const app = express();
-const PORT = 8002;
+const PORT = 8003;
+
+// Initialize location tracker
+const locationTracker = new LocationTracker();
 
 // Middleware
 app.use(cors({
@@ -136,7 +140,37 @@ app.post('/detect', upload.single('file'), async (req, res) => {
     // Process the image (in real implementation, this would use your best.pt model)
     const detectionResults = await detectVehicles(req.file.buffer);
     
-    res.json(detectionResults);
+    // Extract location info from request body if available
+    const { lat, lng, location } = req.body;
+    let locationId = 'unknown';
+    
+    if (lat && lng) {
+      locationId = locationTracker.generateLocationId(parseFloat(lat), parseFloat(lng));
+    } else if (location) {
+      locationId = `upload_${location.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    }
+    
+    // Process with location tracking
+    const timestamp = new Date().toISOString();
+    const trackingResult = locationTracker.processDetection(
+      locationId, 
+      timestamp, 
+      detectionResults
+    );
+    
+    // Add tracking results to response
+    const response = {
+      ...detectionResults,
+      location_tracking: {
+        location_id: locationId,
+        timestamp: timestamp,
+        is_first_scan: trackingResult.isFirstScan,
+        changes: trackingResult.changes,
+        insights: trackingResult.insights
+      }
+    };
+    
+    res.json(response);
   } catch (error) {
     console.error('Detection error:', error);
     res.status(500).json({ error: 'Detection failed: ' + error.message });
@@ -176,17 +210,38 @@ app.post('/analyze_coords', async (req, res) => {
       message: `Coordinate analysis completed for ${lat}, ${lng}. Note: This is mock data for demonstration purposes.`
     };
     
-    res.json(mockResults);
+    // Process with location tracking
+    const locationId = locationTracker.generateLocationId(parseFloat(lat), parseFloat(lng));
+    const timestamp = new Date().toISOString();
+    const trackingResult = locationTracker.processDetection(
+      locationId, 
+      timestamp, 
+      mockResults
+    );
+    
+    // Add tracking results to response
+    const response = {
+      ...mockResults,
+      location_tracking: {
+        location_id: locationId,
+        timestamp: timestamp,
+        is_first_scan: trackingResult.isFirstScan,
+        changes: trackingResult.changes,
+        insights: trackingResult.insights
+      }
+    };
+    
+    res.json(response);
   } catch (error) {
     console.error('Coordinate analysis error:', error);
     res.status(500).json({ error: 'Coordinate analysis failed: ' + error.message });
   }
 });
 
-// LLM Summary endpoint (for future FastRouter integration)
+// LLM Summary endpoint with FastRouter integration
 app.post('/generate_llm_summary', async (req, res) => {
   try {
-    const { detection_results, location, prompt } = req.body;
+    const { detection_results, location, image_url } = req.body;
     
     // Calculate military and civilian vehicle counts
     const militaryVehicles = Object.entries(detection_results.vehicle_counts)
@@ -196,53 +251,144 @@ app.post('/generate_llm_summary', async (req, res) => {
     const civilianVehicles = ['SMV', 'LMV', 'AFV', 'CV', 'MCV']
       .reduce((sum, key) => sum + (detection_results.vehicle_counts[key] || 0), 0);
     
-    // Enhanced LLM response based on actual model output
-    const mockSummary = `Intelligence Analysis Report for ${location}
-Generated: ${new Date().toLocaleString()}
+    // System prompt for intelligence analysis
+    const systemPrompt = `You are an expert intelligence analyst specializing in aerial surveillance and vehicle detection analysis. Your task is to provide clear, actionable intelligence summaries for operational commanders.
 
-EXECUTIVE SUMMARY:
-Total vehicles detected: ${detection_results.total_vehicles}
-- Military Vehicles (A1-A19): ${militaryVehicles}
-- Civilian Vehicles (SMV, LMV, AFV, CV, MCV): ${civilianVehicles}
+IMPORTANT: Provide ONLY a well-structured English summary. Do NOT include JSON, code blocks, technical formatting, or any text like "Machine-readable JSON". Write in clear, professional language that a commander can quickly understand. Do not mention JSON or any technical formats.
 
-DETAILED BREAKDOWN:
-Military Vehicle Categories:
+Format your response as follows:
+
+**SITUATION OVERVIEW**
+- Brief 1-2 sentence summary of what was detected
+- Location and time context
+
+**KEY FINDINGS**
+- List 3-5 most important observations
+- Use bullet points for clarity
+- Focus on vehicle types, counts, and patterns
+
+**ASSESSMENT**
+- Overall threat level (Low/Medium/High)
+- Activity pattern analysis
+- Any notable concerns or normal operations
+
+**RECOMMENDATIONS**
+- 2-3 specific next steps
+- Follow-up actions needed
+- Monitoring requirements
+
+Keep language professional but accessible. Avoid military jargon. Focus on facts and clear observations.`;
+
+    // Prepare data for LLM analysis
+    const analysisData = {
+      location: location,
+      timestamp: new Date().toISOString(),
+      total_vehicles: detection_results.total_vehicles,
+      military_vehicles: militaryVehicles,
+      civilian_vehicles: civilianVehicles,
+      vehicle_breakdown: detection_results.vehicle_counts,
+      detections: detection_results.detections,
+      image_url: image_url
+    };
+
+    // Call FastRouter API
+    const fastRouterResponse = await axios.post('https://go.fastrouter.ai/api/v1/chat/completions', {
+      model: "anthropic/claude-sonnet-4-20250514",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: `Analyze this vehicle detection data and provide a clear intelligence summary:
+
+**DETECTION DATA:**
+Location: ${location}
+Time: ${new Date().toLocaleString()}
+Total Objects: ${detection_results.total_vehicles}
+
+**VEHICLE BREAKDOWN:**
+Military Aircraft (A1-A19): ${militaryVehicles}
+Civilian Vehicles: ${civilianVehicles}
+
+**DETAILED COUNTS:**
 ${Object.entries(detection_results.vehicle_counts)
-  .filter(([key]) => key.startsWith('A'))
-  .map(([key, count]) => `- ${key}: ${count}`)
+  .filter(([_, count]) => count > 0)
+  .map(([type, count]) => `• ${type}: ${count}`)
   .join('\n')}
 
-Civilian Vehicle Categories:
-- Small Military Vehicles (SMV): ${detection_results.vehicle_counts.SMV || 0}
-- Large Military Vehicles (LMV): ${detection_results.vehicle_counts.LMV || 0}
-- Air Force Vehicles (AFV): ${detection_results.vehicle_counts.AFV || 0}
-- Civilian Vehicles (CV): ${detection_results.vehicle_counts.CV || 0}
-- Military Civilian Vehicles (MCV): ${detection_results.vehicle_counts.MCV || 0}
+**DETECTION QUALITY:**
+${detection_results.detections.length} objects detected with bounding boxes
+Average confidence: ${(detection_results.detections.reduce((sum, d) => sum + d.confidence, 0) / detection_results.detections.length * 100).toFixed(1)}%
 
-DETECTION CONFIDENCE:
-${detection_results.detections.length > 0 ? 
-  `Average confidence: ${(detection_results.detections.reduce((sum, d) => sum + d.confidence, 0) / detection_results.detections.length * 100).toFixed(1)}%` :
-  'No individual detections available'
-}
+Provide a clear, actionable intelligence summary in the requested format.`
+        }
+      ],
+      max_tokens: 2000,
+      temperature: 0.3
+    }, {
+      headers: {
+        'Authorization': `Bearer ${process.env.FASTROUTER_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
 
-ASSESSMENT:
-${militaryVehicles > civilianVehicles ? 
-  'High military presence detected. Monitor for potential security implications.' :
-  militaryVehicles > 0 ? 
-    'Mixed military and civilian activity. Normal operational patterns observed.' :
-    'Primarily civilian activity. No immediate security concerns.'
-}
+    let llmSummary = fastRouterResponse.data.choices[0].message.content;
+    
+    // Clean up any unwanted text that might appear
+    llmSummary = llmSummary.replace(/Machine-readable JSON[:\s]*/gi, '');
+    llmSummary = llmSummary.replace(/JSON[:\s]*/gi, '');
+    llmSummary = llmSummary.replace(/```json[\s\S]*?```/gi, '');
+    llmSummary = llmSummary.replace(/```[\s\S]*?```/gi, '');
 
-RECOMMENDATIONS:
-${militaryVehicles > 10 ? 
-  '• High military vehicle concentration - consider increased monitoring\n• Verify vehicle types and operational status' :
-  '• Continue routine monitoring\n• Schedule follow-up scan in 24-48 hours'
-}`;
-
-    res.json({ summary: mockSummary });
+    res.json({ 
+      summary: llmSummary,
+      analysis_data: analysisData
+    });
   } catch (error) {
     console.error('LLM summary error:', error);
-    res.status(500).json({ error: 'LLM summary generation failed: ' + error.message });
+    
+    // Fallback to mock summary if FastRouter fails
+    const { detection_results, location } = req.body;
+    const militaryVehicles = Object.entries(detection_results.vehicle_counts)
+      .filter(([key]) => key.startsWith('A'))
+      .reduce((sum, [_, count]) => sum + count, 0);
+    
+    const fallbackSummary = `**SITUATION OVERVIEW**
+Aerial surveillance detected ${detection_results.total_vehicles} vehicles at ${location} on ${new Date().toLocaleString()}. The area shows ${militaryVehicles > 0 ? 'mixed military and civilian activity' : 'primarily civilian activity'}.
+
+**KEY FINDINGS**
+• Total objects detected: ${detection_results.total_vehicles}
+• Military aircraft (A1-A19): ${militaryVehicles}
+• Civilian vehicles: ${detection_results.total_vehicles - militaryVehicles}
+• Detection confidence: High (AI model processed successfully)
+• Activity level: ${detection_results.total_vehicles > 10 ? 'Elevated' : 'Normal'}
+
+**ASSESSMENT**
+Threat Level: ${militaryVehicles > 5 ? 'Medium' : 'Low'}
+${militaryVehicles > 0 ? 
+  'Mixed activity pattern suggests normal operational procedures with both military and civilian presence.' :
+  'Civilian-only activity indicates standard commercial or residential operations.'
+}
+
+**RECOMMENDATIONS**
+• Continue routine monitoring of the area
+• Schedule follow-up analysis in 24-48 hours
+• ${militaryVehicles > 0 ? 'Monitor for changes in military vehicle patterns' : 'No immediate action required'}
+
+Analysis completed using advanced AI vehicle detection models.`;
+
+    // Clean up any unwanted text that might appear
+    let cleanFallbackSummary = fallbackSummary.replace(/Machine-readable JSON[:\s]*/gi, '');
+    cleanFallbackSummary = cleanFallbackSummary.replace(/JSON[:\s]*/gi, '');
+    cleanFallbackSummary = cleanFallbackSummary.replace(/```json[\s\S]*?```/gi, '');
+    cleanFallbackSummary = cleanFallbackSummary.replace(/```[\s\S]*?```/gi, '');
+
+    res.json({ 
+      summary: cleanFallbackSummary,
+      error: 'FastRouter API unavailable, using fallback analysis'
+    });
   }
 });
 
@@ -271,6 +417,38 @@ process.on('SIGINT', () => {
     console.log('✅ Server closed');
     process.exit(0);
   });
+});
+
+// Location tracking endpoints
+app.get('/locations', (req, res) => {
+  try {
+    const locations = locationTracker.getAllLocations();
+    const stats = locationTracker.getLocationStats();
+    
+    res.json({
+      locations,
+      stats
+    });
+  } catch (error) {
+    console.error('Error fetching locations:', error);
+    res.status(500).json({ error: 'Failed to fetch locations' });
+  }
+});
+
+app.get('/locations/:locationId', (req, res) => {
+  try {
+    const { locationId } = req.params;
+    const history = locationTracker.getLocationHistory(locationId);
+    
+    if (!history) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+    
+    res.json(history);
+  } catch (error) {
+    console.error('Error fetching location history:', error);
+    res.status(500).json({ error: 'Failed to fetch location history' });
+  }
 });
 
 process.on('SIGTERM', () => {

@@ -1,35 +1,46 @@
 import { useState, useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
-import { Activity, MapPin, AlertTriangle, CheckCircle2, Clock, Brain, Car, Truck, Shield, Plane, Info, Image as ImageIcon } from "lucide-react";
-import { DetectionResults } from "@/services/api";
+import { Activity, MapPin, AlertTriangle, CheckCircle2, Clock, Brain, Car, Truck, Shield, Plane, Info, Image as ImageIcon, Trash2 } from "lucide-react";
+import { generateLLMSummary } from "@/services/api";
+import { useDetection } from "@/contexts/DetectionContext";
 
 const Dashboard = () => {
   const [searchValue, setSearchValue] = useState("");
-  const location = useLocation();
-  const [analysisResults, setAnalysisResults] = useState<{
-    imageUrl: string;
-    detectionResults: DetectionResults;
-    location: string;
-    fromAnalysis: boolean;
-  } | null>(null);
+  const { analysisResults, scanHistory, clearResults } = useDetection();
+  const [llmSummary, setLlmSummary] = useState<string>("");
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
 
-  // Get analysis results from navigation state
+  // Generate LLM summary when analysis results are available
   useEffect(() => {
-    if (location.state?.fromAnalysis) {
-      setAnalysisResults({
-        imageUrl: location.state.imageUrl,
-        detectionResults: location.state.detectionResults,
-        location: location.state.location,
-        fromAnalysis: location.state.fromAnalysis
-      });
+    if (analysisResults && !llmSummary) {
+      generateIntelligenceSummary();
     }
-  }, [location.state]);
+  }, [analysisResults, llmSummary]);
+
+  const generateIntelligenceSummary = async () => {
+    if (!analysisResults) return;
+    
+    setIsGeneratingSummary(true);
+    try {
+      const summary = await generateLLMSummary(
+        analysisResults.detectionResults, 
+        analysisResults.location, 
+        analysisResults.imageUrl
+      );
+      setLlmSummary(summary.summary);
+    } catch (error) {
+      console.error('Failed to generate LLM summary:', error);
+      setLlmSummary("Intelligence analysis unavailable. Please try again later.");
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
 
   // Handle image load to get actual dimensions
   const handleImageLoad = () => {
@@ -79,52 +90,72 @@ const Dashboard = () => {
     return { scaleX, scaleY, offsetX, offsetY };
   };
 
-  // Model analysis results
-  const modelResults = {
-    totalScans: 3,
-    totalVehiclesDetected: 156,
-    lastScanLocation: "Delhi Airport",
-    lastScanTime: "2 hours ago",
-    llmSummary: `Based on the analysis of 3 satellite scans across different regions, our AI model has identified significant patterns in vehicle activity. The system detected a total of 156 vehicles with notable concentration around Delhi Airport and Mumbai Port areas. The model's confidence level is 94.2% for vehicle classification accuracy.
+  // Helper function to calculate accurate vehicle counts
+  const calculateVehicleCounts = (vehicleCounts: any) => {
+    const military = Object.entries(vehicleCounts)
+      .filter(([key]) => key.startsWith('A'))
+      .reduce((sum, [_, count]) => sum + count, 0);
+    const civilian = ['SMV', 'LMV', 'AFV', 'CV', 'MCV']
+      .reduce((sum, key) => sum + (vehicleCounts[key] || 0), 0);
+    const airplanes = Object.entries(vehicleCounts)
+      .filter(([key]) => {
+        const militaryKeys = Array.from({length: 19}, (_, i) => `A${i+1}`);
+        const civilianKeys = ['SMV', 'LMV', 'AFV', 'CV', 'MCV'];
+        return !militaryKeys.includes(key) && !civilianKeys.includes(key);
+      })
+      .reduce((sum, [_, count]) => sum + count, 0);
+    return { military, civilian, airplanes, total: military + civilian + airplanes };
+  };
 
-Key findings indicate normal civilian activity patterns with some areas showing elevated military vehicle presence. The AI has flagged 2 regions for further monitoring due to unusual vehicle clustering patterns that deviate from baseline expectations.`,
+  // Use real detection results or fallback to mock data
+  const modelResults = analysisResults ? (() => {
+    const counts = calculateVehicleCounts(analysisResults.detectionResults.vehicle_counts);
+    return {
+      totalScans: scanHistory.length,
+      totalVehiclesDetected: counts.total,
+      lastScanLocation: analysisResults.location,
+      lastScanTime: new Date(analysisResults.timestamp).toLocaleString(),
+      llmSummary: `Based on the latest satellite scan analysis, our AI model has identified vehicle activity patterns in the specified region. The system detected a total of ${counts.total} vehicles with detailed classification across military and civilian categories.
+
+Key findings indicate ${counts.total > 10 ? 'elevated' : 'normal'} activity patterns with ${Object.entries(analysisResults.detectionResults.vehicle_counts).filter(([_, count]) => count > 0).length} different vehicle types detected.`,
+      
+      vehicleBreakdown: {
+        military: counts.military,
+        civilian: counts.civilian,
+        SMV: analysisResults.detectionResults.vehicle_counts.SMV || 0,
+        LMV: analysisResults.detectionResults.vehicle_counts.LMV || 0,
+        AFV: analysisResults.detectionResults.vehicle_counts.AFV || 0,
+        CV: analysisResults.detectionResults.vehicle_counts.CV || 0,
+        MCV: analysisResults.detectionResults.vehicle_counts.MCV || 0
+      },
+      
+      scanHistory: scanHistory.map(scan => ({
+        id: scan.id,
+        location: scan.location,
+        timestamp: new Date(scan.timestamp).toLocaleString(),
+        vehicles: Object.values(scan.detectionResults.vehicle_counts).reduce((sum, count) => sum + count, 0),
+        status: "completed",
+        confidence: "High"
+      }))
+    };
+  })() : {
+    totalScans: 0,
+    totalVehiclesDetected: 0,
+    lastScanLocation: "No scans yet",
+    lastScanTime: "N/A",
+    llmSummary: "No analysis data available. Upload an image to begin vehicle detection analysis.",
     
     vehicleBreakdown: {
-      military: 45,
-      civilian: 111,
-      SMV: 67,
-      LMV: 28,
-      AFV: 8,
-      CV: 6,
-      MCV: 2
+      military: 0,
+      civilian: 0,
+      SMV: 0,
+      LMV: 0,
+      AFV: 0,
+      CV: 0,
+      MCV: 0
     },
     
-    scanHistory: [
-      {
-        id: 1,
-        location: "Delhi Airport",
-        timestamp: "2 hours ago",
-        vehicles: 47,
-        status: "completed",
-        confidence: 96.8
-      },
-      {
-        id: 2,
-        location: "Mumbai Port", 
-        timestamp: "5 hours ago",
-        vehicles: 89,
-        status: "completed",
-        confidence: 94.2
-      },
-      {
-        id: 3,
-        location: "Chennai Base",
-        timestamp: "1 day ago", 
-        vehicles: 20,
-        status: "completed",
-        confidence: 91.5
-      }
-    ]
+    scanHistory: []
   };
 
   // Show "first scan" message if only one scan, otherwise show alerts
@@ -187,12 +218,25 @@ Key findings indicate normal civilian activity patterns with some areas showing 
         <div className="max-w-7xl mx-auto space-y-8">
           
           {/* Header */}
-          <div className="flex items-center gap-4">
-            <Activity className="w-8 h-8 text-primary" />
-            <div>
-              <h1 className="text-3xl font-bold text-foreground">Vehicle Monitoring Dashboard</h1>
-              <p className="text-muted-foreground">Global vehicle detection and activity analysis</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Activity className="w-8 h-8 text-primary" />
+              <div>
+                <h1 className="text-3xl font-bold text-foreground">Vehicle Monitoring Dashboard</h1>
+                <p className="text-muted-foreground">Global vehicle detection and activity analysis</p>
+              </div>
             </div>
+            {analysisResults && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={clearResults}
+                className="text-destructive hover:text-destructive-foreground hover:bg-destructive"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Clear Results
+              </Button>
+            )}
           </div>
 
           {/* Analysis Results Section */}
@@ -222,7 +266,6 @@ Key findings indicate normal civilian activity patterns with some areas showing 
                           const [xmin, ymin, xmax, ymax] = detection.bbox;
                           const width = xmax - xmin;
                           const height = ymax - ymin;
-                          const confidence = Math.round(detection.confidence * 100);
                           
                           // Get proper scaling and offset for object-contain
                           const { scaleX, scaleY, offsetX, offsetY } = getImageDisplayInfo();
@@ -239,7 +282,7 @@ Key findings indicate normal civilian activity patterns with some areas showing 
                               }}
                             >
                               <div className="absolute -top-6 left-0 text-xs bg-primary text-primary-foreground px-1 rounded">
-                                {detection.class.toUpperCase()} {confidence}%
+                                {detection.class.toUpperCase()}
                               </div>
                             </div>
                           );
@@ -265,47 +308,47 @@ Key findings indicate normal civilian activity patterns with some areas showing 
                     <div className="space-y-4">
                       <div className="text-center">
                         <div className="text-4xl font-bold text-primary mb-2">
-                          {analysisResults.detectionResults.total_vehicles}
+                          {analysisResults.detectionResults.detections.filter((detection) => {
+                            const [xmin, ymin, xmax, ymax] = detection.bbox;
+                            const width = xmax - xmin;
+                            const height = ymax - ymin;
+                            return width > 5 && height > 5 && xmin >= 0 && ymin >= 0 && xmax > xmin && ymax > ymin;
+                          }).length}
                         </div>
-                        <div className="text-sm text-muted-foreground">Total Vehicles Detected</div>
+                        <div className="text-sm text-muted-foreground">Objects Detected (Visual)</div>
                       </div>
                       
                       <div className="space-y-3">
-                        {/* Military Vehicles (A1-A19) */}
-                        <div>
-                          <h4 className="text-sm font-medium text-foreground mb-2">Military Vehicles (A1-A19)</h4>
-                          <div className="grid grid-cols-3 gap-2">
-                            {Array.from({length: 19}, (_, i) => `A${i+1}`).map(vehicleClass => (
-                              <div key={vehicleClass} className="flex items-center justify-between p-2 bg-muted rounded text-xs">
-                                <span className="text-muted-foreground">{vehicleClass}</span>
-                                <Badge variant="secondary" className="text-xs">
-                                  {analysisResults.detectionResults.vehicle_counts[vehicleClass as keyof typeof analysisResults.detectionResults.vehicle_counts] || 0}
-                                </Badge>
-                              </div>
-                            ))}
+                        {/* Detection Summary */}
+                        <div className="text-center p-4 bg-muted rounded-lg">
+                          <div className="text-sm text-muted-foreground mb-2">Detection Summary</div>
+                          <div className="text-lg font-semibold text-foreground">
+                            {analysisResults.detectionResults.detections.filter((detection) => {
+                              const [xmin, ymin, xmax, ymax] = detection.bbox;
+                              const width = xmax - xmin;
+                              const height = ymax - ymin;
+                              return width > 5 && height > 5 && xmin >= 0 && ymin >= 0 && xmax > xmin && ymax > ymin;
+                            }).length} objects detected visually
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            with bounding boxes on image
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-2">
+                            Text analysis: {analysisResults.detectionResults.total_vehicles} total objects
                           </div>
                         </div>
                         
-                        {/* Civilian Vehicles */}
-                        <div>
-                          <h4 className="text-sm font-medium text-foreground mb-2">Civilian Vehicles</h4>
-                          <div className="grid grid-cols-2 gap-2">
-                            {['SMV', 'LMV', 'AFV', 'CV', 'MCV'].map(vehicleClass => (
-                              <div key={vehicleClass} className="flex items-center justify-between p-2 bg-muted rounded text-xs">
-                                <span className="text-muted-foreground">{vehicleClass}</span>
-                                <Badge variant="secondary" className="text-xs">
-                                  {analysisResults.detectionResults.vehicle_counts[vehicleClass as keyof typeof analysisResults.detectionResults.vehicle_counts] || 0}
-                                </Badge>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
                       </div>
 
                       <Alert className="bg-success/10 border-success/20">
                         <CheckCircle2 className="h-4 w-4 text-success" />
                         <AlertDescription className="text-success">
-                          Analysis completed successfully with {analysisResults.detectionResults.total_vehicles} vehicles detected
+                          Analysis completed successfully with {analysisResults.detectionResults.detections.filter((detection) => {
+                            const [xmin, ymin, xmax, ymax] = detection.bbox;
+                            const width = xmax - xmin;
+                            const height = ymax - ymin;
+                            return width > 5 && height > 5 && xmin >= 0 && ymin >= 0 && xmax > xmin && ymax > ymin;
+                          }).length} objects detected
                         </AlertDescription>
                       </Alert>
                     </div>
@@ -329,11 +372,24 @@ Key findings indicate normal civilian activity patterns with some areas showing 
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="prose prose-invert max-w-none">
-                    <p className="text-sm text-foreground leading-relaxed bg-muted p-4 rounded-lg">
-                      {modelResults.llmSummary}
-                    </p>
-                  </div>
+                  {isGeneratingSummary ? (
+                    <div className="flex items-center gap-3 p-4 rounded-lg bg-muted">
+                      <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                      <span className="text-sm text-foreground">Generating intelligence summary...</span>
+                    </div>
+                  ) : llmSummary ? (
+                    <div className="prose prose-invert max-w-none">
+                      <div className="text-sm text-foreground leading-relaxed bg-muted p-4 rounded-lg whitespace-pre-wrap">
+                        {llmSummary}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="prose prose-invert max-w-none">
+                      <p className="text-sm text-foreground leading-relaxed bg-muted p-4 rounded-lg">
+                        {modelResults.llmSummary}
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -410,7 +466,6 @@ Key findings indicate normal civilian activity patterns with some areas showing 
                         </div>
                         <div className="text-right">
                           <div className="font-bold text-foreground">{scan.vehicles} vehicles</div>
-                          <div className="text-xs text-muted-foreground">{scan.confidence}% confidence</div>
                         </div>
                       </div>
                     ))}
@@ -490,30 +545,78 @@ Key findings indicate normal civilian activity patterns with some areas showing 
                 </CardContent>
               </Card>
 
-              {/* Model Performance */}
-              <Card className="bg-card border-border">
-                <CardHeader>
-                  <CardTitle className="text-foreground">Model Performance</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-foreground">Detection Accuracy</span>
-                    <Badge className="bg-success text-success-foreground">94.2%</Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-foreground">Processing Speed</span>
-                    <Badge className="bg-success text-success-foreground">2.3s avg</Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-foreground">Model Status</span>
-                    <Badge className="bg-success text-success-foreground">Active</Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-foreground">Last Analysis</span>
-                    <span className="text-xs text-muted-foreground">{modelResults.lastScanTime}</span>
-                  </div>
-                </CardContent>
-              </Card>
+              {/* Location Tracking Insights */}
+              {analysisResults?.detectionResults?.location_tracking && (
+                <Card className="bg-card border-border">
+                  <CardHeader>
+                    <CardTitle className="text-foreground flex items-center gap-2">
+                      <MapPin className="w-5 h-5 text-primary" />
+                      Location Tracking Insights
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {/* Location Info */}
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium">Location ID:</span>
+                          <code className="text-xs bg-background px-2 py-1 rounded">
+                            {analysisResults.detectionResults.location_tracking.location_id}
+                          </code>
+                        </div>
+                        <Badge variant={analysisResults.detectionResults.location_tracking.is_first_scan ? "default" : "secondary"}>
+                          {analysisResults.detectionResults.location_tracking.is_first_scan ? "First Scan" : "Repeat Scan"}
+                        </Badge>
+                      </div>
+
+                      {/* Changes Summary */}
+                      {analysisResults.detectionResults.location_tracking.changes && (
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="text-center p-3 rounded-lg bg-muted">
+                            <div className="text-2xl font-bold text-foreground">
+                              {analysisResults.detectionResults.location_tracking.changes.aircraft_diff > 0 ? '+' : ''}
+                              {analysisResults.detectionResults.location_tracking.changes.aircraft_diff}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Aircraft</div>
+                          </div>
+                          <div className="text-center p-3 rounded-lg bg-muted">
+                            <div className="text-2xl font-bold text-foreground">
+                              {analysisResults.detectionResults.location_tracking.changes.vehicles_diff > 0 ? '+' : ''}
+                              {analysisResults.detectionResults.location_tracking.changes.vehicles_diff}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Vehicles</div>
+                          </div>
+                          <div className="text-center p-3 rounded-lg bg-muted">
+                            <div className="text-2xl font-bold text-foreground">
+                              {analysisResults.detectionResults.location_tracking.changes.total_diff > 0 ? '+' : ''}
+                              {analysisResults.detectionResults.location_tracking.changes.total_diff}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Total</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Insights */}
+                      <div className="space-y-2">
+                        <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-primary" />
+                          Intelligence Insights
+                        </h4>
+                        <div className="space-y-2">
+                          {analysisResults.detectionResults.location_tracking.insights.map((insight, index) => (
+                            <div key={index} className="flex items-start gap-2 p-3 rounded-lg bg-muted">
+                              <Info className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                              <span className="text-sm text-foreground">{insight}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
             </div>
           </div>
         </div>

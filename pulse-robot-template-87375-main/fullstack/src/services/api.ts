@@ -14,6 +14,8 @@ export interface VehicleCounts {
   A1: number; A2: number; A3: number; A4: number; A5: number; A6: number; A7: number; A8: number; A9: number; A10: number;
   A11: number; A12: number; A13: number; A14: number; A15: number; A16: number; A17: number; A18: number; A19: number;
   SMV: number; LMV: number; AFV: number; CV: number; MCV: number;
+  // Airplane detections (from best2.pt model)
+  [key: string]: number; // Allow dynamic airplane class names
   // Legacy support for old naming convention
   cars?: number;
   trucks?: number;
@@ -43,11 +45,19 @@ export const checkAPIHealth = async (): Promise<{ status: string; model_loaded: 
 };
 
 // Detect vehicles in an uploaded image
-export const detectVehicles = async (imageFile: File): Promise<DetectionResults> => {
+export const detectVehicles = async (imageFile: File, locationInfo?: { lat?: number; lng?: number; location?: string }): Promise<DetectionResults> => {
   console.log('API: Starting vehicle detection for file:', imageFile.name);
   
   const formData = new FormData();
   formData.append("file", imageFile);
+  
+  // Add location information if provided
+  if (locationInfo?.lat && locationInfo?.lng) {
+    formData.append("lat", locationInfo.lat.toString());
+    formData.append("lng", locationInfo.lng.toString());
+  } else if (locationInfo?.location) {
+    formData.append("location", locationInfo.location);
+  }
 
   try {
     const response = await fetch(`${API_BASE_URL}/detect`, {
@@ -94,56 +104,24 @@ export const analyzeCoordinates = async (lat: number, lng: number): Promise<Dete
 // LLM Analysis API (FastRouter)
 export const generateLLMSummary = async (
   detectionResults: DetectionResults,
-  location: string
+  location: string,
+  imageUrl?: string
 ): Promise<LLMSummary> => {
-  const apiKey = API_CONFIG.FASTROUTER_API_KEY;
-  
-  // Create a more detailed breakdown for the LLM
-  const militaryVehicles = Object.entries(detectionResults.vehicle_counts)
-    .filter(([key]) => key.startsWith('A'))
-    .reduce((sum, [_, count]) => sum + count, 0);
-  
-  const civilianVehicles = ['SMV', 'LMV', 'AFV', 'CV', 'MCV']
-    .reduce((sum, key) => sum + (detectionResults.vehicle_counts[key] || 0), 0);
-  
-  const prompt = `Analyze the following vehicle detection results and provide an intelligence summary:
-
-Location: ${location}
-Total Vehicles Detected: ${detectionResults.total_vehicles}
-Vehicle Breakdown:
-- Military Vehicles (A1-A19): ${militaryVehicles}
-- Civilian Vehicles (SMV, LMV, AFV, CV, MCV): ${civilianVehicles}
-- Small Military Vehicles (SMV): ${detectionResults.vehicle_counts.SMV || 0}
-- Large Military Vehicles (LMV): ${detectionResults.vehicle_counts.LMV || 0}
-- Air Force Vehicles (AFV): ${detectionResults.vehicle_counts.AFV || 0}
-- Civilian Vehicles (CV): ${detectionResults.vehicle_counts.CV || 0}
-- Military Civilian Vehicles (MCV): ${detectionResults.vehicle_counts.MCV || 0}
-
-Detailed Military Vehicle Counts:
-${Object.entries(detectionResults.vehicle_counts)
-  .filter(([key]) => key.startsWith('A'))
-  .map(([key, count]) => `- ${key}: ${count}`)
-  .join('\n')}
-
-Provide a concise intelligence report, highlighting any significant observations or changes.
-`;
-
-  const formData = new FormData();
-  formData.append("detection_results", JSON.stringify(detectionResults));
-  formData.append("location", location);
-  formData.append("prompt", prompt); // Pass prompt to backend
-
   const response = await fetch(`${API_BASE_URL}/generate_llm_summary`, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`, // FastRouter API key
+      "Content-Type": "application/json",
     },
-    body: formData,
+    body: JSON.stringify({
+      detection_results: detectionResults,
+      location: location,
+      image_url: imageUrl
+    }),
   });
 
   if (!response.ok) {
     const errorData = await response.json();
-    throw new Error(`LLM summary generation failed: ${errorData.detail || response.statusText}`);
+    throw new Error(`LLM summary generation failed: ${errorData.error || response.statusText}`);
   }
 
   return response.json();

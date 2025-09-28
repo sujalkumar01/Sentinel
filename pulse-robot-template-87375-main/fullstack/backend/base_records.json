@@ -1,0 +1,68 @@
+{
+  "upload_Uploaded_Image": {
+    "location_id": "upload_Uploaded_Image",
+    "timestamp": "2025-09-27T17:26:08.610Z",
+    "aircraft": 0,
+    "vehicles": 5,
+    "aircraft_positions": [],
+    "vehicle_positions": [
+      [
+        232,
+        47,
+        290,
+        103
+      ],
+      [
+        140,
+        49,
+        203,
+        123
+      ],
+      [
+        509,
+        350,
+        534,
+        396
+      ],
+      [
+        2,
+        0,
+        30,
+        26
+      ],
+      [
+        92,
+        0,
+        120,
+        15
+      ]
+    ],
+    "total_vehicles": 5,
+    "vehicle_counts": {
+      "A1": 0,
+      "A2": 0,
+      "A3": 0,
+      "A4": 0,
+      "A5": 0,
+      "A6": 0,
+      "A7": 0,
+      "A8": 0,
+      "A9": 0,
+      "A10": 0,
+      "A11": 0,
+      "A12": 0,
+      "A13": 0,
+      "A14": 0,
+      "A15": 0,
+      "A16": 0,
+      "A17": 0,
+      "A18": 0,
+      "A19": 0,
+      "SMV": 0,
+      "LMV": 0,
+      "AFV": 2,
+      "CV": 3,
+      "MCV": 0
+    }
+  }
+}

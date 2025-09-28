@@ -37,7 +37,7 @@
 2. **Set up environment variables:**
    - Create a `.env` file in the root directory with:
    ```
-   VITE_GOOGLE_MAPS_API_KEY=AIzaSyBj1dPeorJoI49RuUABA8YNggkem6n5n58
+   VITE_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
    VITE_FASTROUTER_API_KEY=your_fastrouter_api_key_here
    VITE_BACKEND_API_URL=http://localhost:8000
    ```

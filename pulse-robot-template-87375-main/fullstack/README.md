@@ -1,8 +1,58 @@
-# Welcome to your Lovable project
+# SatelliteWatch - AI-Powered Vehicle Detection System
 
-## Project info
+A full-stack application for detecting and analyzing vehicles in satellite imagery using YOLO models and AI-powered intelligence summaries.
 
-**URL**: https://lovable.dev/projects/35d72d2e-6e25-40e5-9b0c-c0d1a7c1b727
+## 🚀 Features
+
+- **Image Upload & Analysis**: Upload satellite/aerial images for vehicle detection
+- **Coordinate-Based Capture**: Enter coordinates to capture images from Google Maps
+- **AI-Powered Intelligence**: Generate detailed analysis reports using FastRouter API
+- **Real-time Processing**: Live processing overlay with progress tracking
+- **Modern UI**: Beautiful, responsive interface with dark theme support
+- **Location Tracking**: Track and analyze vehicle patterns over time
+
+## 🔧 Tech Stack
+
+**Frontend:**
+- React 18 + TypeScript
+- Vite (build tool)
+- Tailwind CSS + shadcn/ui
+- React Router
+- Lottie animations
+
+**Backend:**
+- Node.js + Express
+- Python + YOLO (Ultralytics)
+- FastRouter API integration
+- Multer for file uploads
+
+## 🛡️ Security Notice
+
+**IMPORTANT**: This project contains sensitive API keys and should be configured properly before deployment.
+
+### Required Environment Variables
+
+1. **Frontend** (create `.env` file in root):
+```bash
+VITE_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
+VITE_FASTROUTER_API_KEY=your_fastrouter_api_key
+VITE_BACKEND_API_URL=http://localhost:8003
+```
+
+2. **Backend** (create `.env` file in backend/):
+```bash
+FASTROUTER_API_KEY=your_fastrouter_api_key
+PORT=8003
+NODE_ENV=development
+```
+
+### Security Checklist Before Pushing to GitHub
+
+- ✅ API keys removed from source code
+- ✅ Environment variables properly configured
+- ✅ .gitignore updated to exclude sensitive files
+- ✅ Model files excluded (can be large)
+- ✅ No hardcoded credentials in code
 
 ## How can I edit this code?
 

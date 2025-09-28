@@ -20,16 +20,35 @@ export const getCivilianVehicleCount = (vehicleCounts: VehicleCounts): number =>
 };
 
 /**
+ * Calculate airplane count from model output
+ */
+export const getAirplaneCount = (vehicleCounts: VehicleCounts): number => {
+  // Get all keys that are not military vehicles (A1-A19) or civilian vehicles
+  const militaryKeys = Array.from({length: 19}, (_, i) => `A${i+1}`);
+  const civilianKeys = ['SMV', 'LMV', 'AFV', 'CV', 'MCV'];
+  const knownKeys = [...militaryKeys, ...civilianKeys];
+  
+  return Object.entries(vehicleCounts)
+    .filter(([key]) => !knownKeys.includes(key))
+    .reduce((sum, [_, count]) => sum + count, 0);
+};
+
+/**
  * Get vehicle breakdown for display
  */
 export const getVehicleBreakdown = (detectionResults: DetectionResults) => {
   const military = getMilitaryVehicleCount(detectionResults.vehicle_counts);
   const civilian = getCivilianVehicleCount(detectionResults.vehicle_counts);
+  const airplanes = getAirplaneCount(detectionResults.vehicle_counts);
+  
+  // Calculate actual total from individual counts to ensure accuracy
+  const calculatedTotal = military + civilian + airplanes;
   
   return {
-    total: detectionResults.total_vehicles,
+    total: calculatedTotal, // Use calculated total instead of model's total_vehicles
     military,
     civilian,
+    airplanes,
     breakdown: {
       SMV: detectionResults.vehicle_counts.SMV || 0,
       LMV: detectionResults.vehicle_counts.LMV || 0,
@@ -39,6 +58,16 @@ export const getVehicleBreakdown = (detectionResults: DetectionResults) => {
     },
     militaryBreakdown: Object.entries(detectionResults.vehicle_counts)
       .filter(([key]) => key.startsWith('A'))
+      .reduce((acc, [key, count]) => {
+        acc[key] = count;
+        return acc;
+      }, {} as Record<string, number>),
+    airplaneBreakdown: Object.entries(detectionResults.vehicle_counts)
+      .filter(([key]) => {
+        const militaryKeys = Array.from({length: 19}, (_, i) => `A${i+1}`);
+        const civilianKeys = ['SMV', 'LMV', 'AFV', 'CV', 'MCV'];
+        return !militaryKeys.includes(key) && !civilianKeys.includes(key);
+      })
       .reduce((acc, [key, count]) => {
         acc[key] = count;
         return acc;

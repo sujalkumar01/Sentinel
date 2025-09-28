@@ -12,9 +12,11 @@ import ProcessingOverlay from "@/components/ProcessingOverlay";
 import { Upload, Target, Camera, MapPin, AlertCircle } from "lucide-react";
 import { detectVehicles, analyzeCoordinates, checkAPIHealth } from "@/services/api";
 import { API_CONFIG } from "@/config/api";
+import { useDetection } from "@/contexts/DetectionContext";
 
 const GlobalMap = () => {
   const navigate = useNavigate();
+  const { addAnalysisResult } = useDetection();
   const [searchLocation, setSearchLocation] = useState("");
   const [isUploadMode, setIsUploadMode] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -144,20 +146,22 @@ const GlobalMap = () => {
         setCapturedImage(imageUrl);
         
         // Detect vehicles in uploaded image
-        detectionResults = await detectVehicles(uploadedFile);
+        detectionResults = await detectVehicles(uploadedFile, { location: 'Uploaded Image' });
       }
       
-      // Navigate to dashboard with both image and detection results
+      // Store results in context and navigate to dashboard
       setTimeout(() => {
         setIsProcessing(false);
-        navigate("/dashboard", { 
-          state: { 
-            imageUrl: capturedImage || imageUrl,
-            detectionResults: detectionResults,
-            location: isValidCoordinates ? `${currentLocation?.lat}, ${currentLocation?.lng}` : 'Uploaded Image',
-            fromAnalysis: true
-          } 
+        
+        // Store in context for persistent access
+        addAnalysisResult({
+          imageUrl: capturedImage || imageUrl,
+          detectionResults: detectionResults,
+          location: isValidCoordinates ? `${currentLocation?.lat}, ${currentLocation?.lng}` : 'Uploaded Image',
+          fromAnalysis: true
         });
+        
+        navigate("/dashboard");
       }, 3000);
     } catch (error) {
       console.error('Error during capture:', error);
@@ -178,7 +182,7 @@ const GlobalMap = () => {
       
       // Detect vehicles in uploaded image
       console.log('Calling detectVehicles API...');
-      const detectionResults = await detectVehicles(uploadedFile);
+      const detectionResults = await detectVehicles(uploadedFile, { location: 'Uploaded Image' });
       console.log('Detection results received:', detectionResults);
       console.log('Total vehicles detected:', detectionResults.total_vehicles);
       console.log('Vehicle counts:', detectionResults.vehicle_counts);
@@ -187,13 +191,16 @@ const GlobalMap = () => {
       setTimeout(() => {
         console.log('Redirecting to results with detection data...');
         setIsProcessing(false);
-        navigate("/results", { 
-          state: { 
-            imageUrl,
-            detectionResults,
-            location: 'Uploaded Image'
-          } 
+        
+        // Store in context for persistent access
+        addAnalysisResult({
+          imageUrl,
+          detectionResults,
+          location: 'Uploaded Image',
+          fromAnalysis: true
         });
+        
+        navigate("/results");
       }, 3000);
     } catch (error) {
       console.error('Error analyzing image:', error);
@@ -276,7 +283,7 @@ const GlobalMap = () => {
         )}
 
         {/* Globe Component */}
-        <div className={`transition-all duration-500 ${isUploadMode ? 'blur-sm opacity-50' : ''}`}>
+        <div className={`transition-all duration-500 ${isUploadMode ? 'hidden' : ''}`}>
           <Globe />
         </div>
 
@@ -301,8 +308,8 @@ const GlobalMap = () => {
 
         {/* Upload Mode Controls */}
         {isUploadMode && (
-          <div className="absolute inset-0 flex items-center justify-center z-20">
-            <Card className="w-full max-w-lg bg-card/95 backdrop-blur-sm border-2 border-primary/20">
+          <div className="absolute inset-0 flex items-center justify-center z-20 pt-12">
+            <Card className="w-full max-w-lg bg-card border-2 border-primary/20">
               <CardContent className="p-8 space-y-6">
                 <div className="text-center">
                   <Upload className="w-16 h-16 text-primary mx-auto mb-4" />
