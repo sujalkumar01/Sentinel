@@ -4,7 +4,8 @@
 
 A full-stack application for detecting and analyzing vehicles in aerial/satellite imagery using advanced YOLO models and AI-powered intelligence summaries.
 
-![SENTINEL Application Screenshot](image.png)
+<img width="1268" height="1272" alt="image" src="https://github.com/user-attachments/assets/7772064c-f16f-4117-8460-e0ce0a5188af" />
+
 
 ## 🌟 Overview
 
